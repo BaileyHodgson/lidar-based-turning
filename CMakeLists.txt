@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.10)
 project(RPLidarRotationDetector)
 
+# Add this at the top or modify as needed
+set(RPLIDAR_SDK_DIR "${CMAKE_SOURCE_DIR}/rplidar_sdk")
+include_directories(${RPLIDAR_SDK_DIR}/include)
+link_directories(${RPLIDAR_SDK_DIR}/output)
+
 set(CMAKE_CXX_STANDARD 14)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -30,6 +35,7 @@ target_link_libraries(RPLidarRotationDetector
     pigpio
     pthread
     rt
+    rplidar_sdk
 )
 
 # Optional: Show extra messages during configuration
