@@ -1,2 +1,10 @@
-g++ -c sdk/src/arch/linux/net_serial.cpp sdk/src/hal/thread.cpp sdk/src/hal/types.cpp -Isdk/include -o output/rplidar_sdk.o
-ar rcs output/librplidar_sdk.a output/rplidar_sdk.o
+mkdir -p output
+g++ -std=c++11 -I./sdk/include \
+    sdk/src/arch/linux/net_serial.cpp \
+    sdk/src/arch/linux/net_socket.cpp \
+    sdk/src/arch/linux/timer.cpp \
+    sdk/src/rplidar/rplidar_driver.cpp \
+    sdk/src/rplidar/rplidar_driver_impl.cpp \
+    -c
+ar rcs output/librplidar_sdk.a *.o
+rm *.o
