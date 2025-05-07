@@ -128,6 +128,11 @@ public:
 	 **/
 	int getPWMrange() { return pwmRange; }
 
+	bool dataAvailable = false;
+	void getData();
+	int currentBufIdx = 0;
+	A1LidarData a1LidarData[2][nDistance];
+
 private:
 	static unsigned long getTimeMS() {
 		std::chrono::time_point<std::chrono::system_clock> now = 
@@ -146,19 +151,15 @@ private:
 	DataInterface* dataInterface = nullptr;
 	float rpm(unsigned char *packet);
 	void updateMotorPWM(int newMotorDrive);
-	void getData();
 	static void run(A1Lidar* a1Lidar);
 	int tty_fd = 0;
 	bool running = true;
         int motorDrive = 50;
-	A1LidarData a1LidarData[2][nDistance];
 	std::thread* worker = nullptr;
 	float currentRPM = 0;
 	std::mutex readoutMtx;
 	int pwmRange = -1;
 	bool doInit = true;
-	bool dataAvailable = false;
-	int currentBufIdx = 0;
 	RPlidarDriver *drv;
 	RplidarScanMode scanMode;
 };
