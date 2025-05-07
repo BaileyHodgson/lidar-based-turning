@@ -8,3 +8,6 @@ g++ -std=c++11 -I./sdk/include \
     -c
 ar rcs output/librplidar_sdk.a *.o
 rm *.o
+
+g++ -c sdk/src/arch/linux/net_serial.cpp sdk/src/hal/thread.cpp sdk/src/hal/types.cpp -Isdk/include -o output/rplidar_sdk.o
+ar rcs output/librplidar_sdk.a output/rplidar_sdk.o
