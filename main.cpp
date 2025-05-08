@@ -1,120 +1,107 @@
-#include <iostream>
+#include "a1lidarrpi.h"
 #include <vector>
 #include <cmath>
-#include <chrono>
-#include <thread>
-#include <mutex>
-#include <algorithm>
-#include <a1lidarrpi.h>  // Include the LIDAR header file
+#include <cstdio>
 
-using namespace std;
+// ---------- CONFIGURATION CONSTANTS ----------
 
-struct ScanData {
-    std::vector<float> distances;
-};
+// Edge detection sensitivity (difference in range between two points to be considered an edge)
+constexpr float edgeThreshold = 0.25f;  // meters
 
-// Normalize angle to range [0, 359]
-int normalize_angle(float angle) {
-    int a = static_cast<int>(angle);
-    a = ((a % 360) + 360) % 360;
-    return a;
+// Define the angular window (in degrees) in front of the robot to look for edges
+constexpr float frontAngleMin = -15.0f; // degrees (left edge of forward cone)
+constexpr float frontAngleMax = 15.0f;  // degrees (right edge of forward cone)
+
+// Global flag to avoid multiple turns per session
+bool edgeDetected = false;
+
+// ---------- UTILITY FUNCTION: Check if angle is in front sector ----------
+bool inFront(float angleRadians) {
+	float deg = angleRadians * 180.0f / M_PI; // Convert radians to degrees
+	return deg >= frontAngleMin && deg <= frontAngleMax;
 }
 
-// Compute edge energy (sum of absolute differences between distances)
-float compute_edge_energy(const std::vector<float>& distances) {
-    float energy = 0.0f;
-    for (size_t i = 1; i < distances.size(); ++i) {
-        if (distances[i] > 0 && distances[i - 1] > 0) {
-            energy += std::abs(distances[i] - distances[i - 1]);
-        }
-    }
-    return energy;
+// ---------- FUNCTION: Simulate a 90° robot turn (GPIO control placeholder) ----------
+void rotate90Degrees() {
+	fprintf(stderr, ">>> Rotating robot 90 degrees...\n");
 }
 
-// Compute the total difference between two scans (point-wise absolute difference)
-float compute_difference(const std::vector<float>& a, const std::vector<float>& b) {
-    float diff = 0.0f;
-    for (size_t i = 0; i < a.size(); ++i) {
-        if (a[i] > 0 && b[i] > 0) {
-            diff += std::abs(a[i] - b[i]);
-        }
-    }
-    return diff;
-}
-
-class RotationDetector {
-public:
-    RotationDetector(A1Lidar& lidar) : lidar_(lidar) {}
-
-    // Get data from LIDAR and convert it into a ScanData format
-    bool acquire_scan(ScanData& scan) {
-        // LIDAR data is stored in `a1LidarData`
-        lidar_.getData();  // Get new data from LIDAR
-
-        if (lidar_.dataAvailable) {
-            // Extract distances from the LIDAR data and fill the ScanData structure
-            scan.distances.clear();
-            scan.distances.resize(360, 0.0f);  // Initialize distances for 360 degrees
-
-            for (int i = 0; i < 360; ++i) {
-                if (lidar_.a1LidarData[lidar_.currentBufIdx][i].valid) {
-                    scan.distances[i] = lidar_.a1LidarData[lidar_.currentBufIdx][i].r;
+// ---------- CUSTOM LIDAR DATA HANDLER ----------
+class DataInterface : public A1Lidar::DataInterface {
+    public:
+        bool turning = false;
+        float referenceAngle = 0.0f; // Angle to compare against
+        bool referenceCaptured = false;
+    
+        // Called for every new 360° scan
+        void newScanAvail(float, A1LidarData (&data)[A1Lidar::nDistance]) override {
+            // Step 1: Get angle of closest valid object
+            float minRange = 1000.0f;  // Some large initial number
+            float angleAtMinRange = 0.0f;
+    
+            for (A1LidarData &point : data) {
+                if (point.valid && point.r < minRange) {
+                    minRange = point.r;
+                    angleAtMinRange = point.phi;
                 }
             }
-            return true;
-        }
-        return false;
-    }
-
-    // Detect rotation by comparing current scan with baseline scan
-    bool detect_rotation(ScanData& baseline_scan) {
-        ScanData current_scan;
-        if (acquire_scan(current_scan)) {
-            float diff = compute_difference(baseline_scan.distances, current_scan.distances);
-            std::cout << "Difference from baseline: " << diff << std::endl;
-
-            // Threshold to detect significant rotation (adjust as needed)
-            if (diff > 8000.0f) {
-                std::cout << "Rotation detected!" << std::endl;
-                return true;
+    
+            // Step 2: Capture reference before turning
+            if (!referenceCaptured && minRange < 5.0f) {
+                referenceAngle = angleAtMinRange;
+                referenceCaptured = true;
+                fprintf(stderr, "\nReference angle captured: %.2f°\n", angleAtMinRange * 180.0f / M_PI);
+    
+                // Start turning
+                turning = true;
+                fprintf(stderr, ">>> START TURN\n");
+            }
+    
+            // Step 3: While turning, check angular difference
+            if (turning) {
+                float angleDiff = angleAtMinRange - referenceAngle;
+    
+                // Normalize to [-PI, PI]
+                while (angleDiff > M_PI) angleDiff -= 2*M_PI;
+                while (angleDiff < -M_PI) angleDiff += 2*M_PI;
+    
+                float degDiff = angleDiff * 180.0f / M_PI;
+                fprintf(stderr, "Angle diff: %.2f°\n", degDiff);
+    
+                if (std::abs(degDiff) >= 90.0f) {
+                    // Reached 90° turn
+                    turning = false;
+    
+                    // Stop motors
+                    // digitalWrite(LEFT_MOTOR_PIN, LOW);
+                    // digitalWrite(RIGHT_MOTOR_PIN, LOW);
+                    fprintf(stderr, ">>> STOP TURN at %.2f° diff\n", degDiff);
+                }
             }
         }
-        return false;
-    }
+    };
+    
 
-private:
-    A1Lidar& lidar_;
-};
 
-int main() {
-    const char* serial_port = "/dev/serial0";  // Use GPIO UART for communication
-    unsigned int rpm = 600;  // Set desired RPM
 
-    // Initialize the LIDAR object
-    A1Lidar lidar;
-    lidar.start(serial_port, rpm);  // Start the LIDAR scan
+// ---------- MAIN FUNCTION ----------
+int main(int, char **) {
+	// Print info about data format
+	fprintf(stderr,"Data format: x <tab> y <tab> r <tab> phi <tab> strength\n");
+	fprintf(stderr,"Press any key to stop.\n");
 
-    // Create a rotation detector object
-    RotationDetector rotation_detector(lidar);
+	A1Lidar lidar;                // Create a LIDAR object
+	DataInterface dataInterface; // Create the custom data handler
 
-    // Capture the baseline scan
-    ScanData baseline_scan;
-    while (!rotation_detector.acquire_scan(baseline_scan)) {
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));
-    }
+	lidar.registerInterface(&dataInterface); // Register the callback
+	lidar.start();                            // Begin scanning
 
-    std::cout << "Monitoring for rotation..." << std::endl;
+	// Wait until user presses any key
+	do {
+	} while (!getchar());
 
-    // Continuously monitor for significant rotation based on edge detection
-    while (true) {
-        if (rotation_detector.detect_rotation(baseline_scan)) {
-            // Handle rotation detected
-            break;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));  // Delay between scans
-    }
-
-    // Stop the LIDAR when done
-    lidar.stop();
-    return 0;
+	// Stop LIDAR and clean up
+	lidar.stop();
+	fprintf(stderr,"\n");
+	return 0;
 }
